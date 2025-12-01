@@ -529,7 +529,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
-	// Handle viewport scrolling
+	// Handle viewport scrolling (including mouse wheel!)
 	m.viewport, cmd = m.viewport.Update(msg)
 	cmds = append(cmds, cmd)
 
@@ -613,7 +613,7 @@ func (m model) View() string {
 		if m.totalTokens > 0 {
 			usageInfo = fmt.Sprintf(" | Tokens: %d", m.totalTokens)
 		}
-		statusText = fmt.Sprintf("Ready | Messages: %d%s", len(m.messages)/2, usageInfo)
+		statusText = fmt.Sprintf("Ready | Messages: %d%s | Use mouse wheel to scroll through history", len(m.messages)/2, usageInfo)
 	}
 	statusBar := styleStatus.Width(m.width - 2).Render(statusText)
 
@@ -652,9 +652,9 @@ func (m model) View() string {
 	// Footer
 	var footerText string
 	if m.showHelp {
-		footerText = "Commands: /quit /exit /clear /new /reset /help /status | Keys: ? (help) ctrl+c (quit)"
+		footerText = "Commands: /quit /exit /clear /new /reset /help /status | Keys: ? (help) ctrl+c (quit) | Mouse wheel scrolls chat history"
 	} else {
-		footerText = "/quit /clear /help /status | ? for more help | ctrl+c to exit"
+		footerText = "/quit /clear /help /status | ? for more help | mouse wheel to scroll | ctrl+c to exit"
 	}
 	footer := styleFooter.Width(m.width - 2).Render(footerText)
 
@@ -675,7 +675,7 @@ func (m model) View() string {
 		viewportContent,
 		statusBar,
 		inputBox,
-		footer,
+	 footer,
 	)
 }
 

@@ -33,7 +33,7 @@ func main() {
 	agt := agent.New(llmProvider)
 
 	// Start UI
-	p := tea.NewProgram(ui.InitialModel(agt))
+	p := tea.NewProgram(ui.InitialModel(agt), tea.WithMouseCellMotion())
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("Alas, there's been an error: %v", err)
 		os.Exit(1)
