@@ -286,7 +286,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.messages = append(m.messages, toolMsg)
 		}
 
-		m.messages = append(m.messages, styleClippy.Render("[📎] ")+msg.content)
+		// Strip any leading emojis and whitespace from the content
+		content := msg.content
+		for len(content) > 0 {
+			r, size := []rune(content)[0], len([]rune(content)[0:1])
+			// Check if it's an emoji or whitespace
+			if r > 127 || r == ' ' || r == '\t' || r == '\n' {
+				content = content[size:]
+			} else {
+				break
+			}
+		}
+
+		m.messages = append(m.messages, styleClippy.Render("[📎] ")+content)
 		if msg.usage != nil && msg.usage.Usage != nil {
 			m.totalTokens += msg.usage.Usage.TotalTokens
 			m.lastUsage = msg.usage
