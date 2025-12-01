@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/reflow/wordwrap"
 )
 
 // Vaporwave colors
@@ -71,19 +72,21 @@ var keys = keyMap{
 }
 
 type model struct {
-	agent      *agent.Agent
-	viewport   viewport.Model
-	help       help.Model
-	messages   []string
-	input      string
-	quitting   bool
-	spinner    spinner.Model
-	loading    bool
-	width      int
-	height     int
-	ready      bool
-	toolStatus string
-	showHelp   bool
+	agent       *agent.Agent
+	viewport    viewport.Model
+	help        help.Model
+	messages    []string
+	input       string
+	quitting    bool
+	spinner     spinner.Model
+	loading     bool
+	width       int
+	height      int
+	ready       bool
+	toolStatus  string
+	showHelp    bool
+	lastUsage   *agent.Response
+	totalTokens int
 }
 
 func InitialModel(agt *agent.Agent) model {
@@ -104,11 +107,18 @@ func (m model) Init() tea.Cmd {
 	return m.spinner.Tick
 }
 
-type responseMsg string
+type responseMsg struct {
+	content string
+	usage   *agent.Response
+}
 
 func (m model) getAgentResponse(input string) tea.Cmd {
 	return func() tea.Msg {
-		return responseMsg(m.agent.GetResponse(input))
+		resp := m.agent.GetResponse(input)
+		return responseMsg{
+			content: resp.Content,
+			usage:   &resp,
+		}
 	}
 }
 
@@ -195,7 +205,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case responseMsg:
 		m.loading = false
 		m.toolStatus = ""
-		m.messages = append(m.messages, styleClippy.Render("Clippy: ")+string(msg))
+		m.messages = append(m.messages, styleClippy.Render("Clippy: ")+msg.content)
+		if msg.usage != nil && msg.usage.Usage != nil {
+			m.totalTokens += msg.usage.Usage.TotalTokens
+			m.lastUsage = msg.usage
+		}
 		m.updateViewport()
 		return m, nil
 
@@ -212,7 +226,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) updateViewport() {
-	content := strings.Join(m.messages, "\n\n")
+	width := m.width - 6 // Account for borders and padding
+	if width < 0 {
+		width = 0
+	}
+
+	var wrappedMessages []string
+	for _, msg := range m.messages {
+		wrappedMessages = append(wrappedMessages, wordwrap.String(msg, width))
+	}
+
+	content := strings.Join(wrappedMessages, "\n\n")
 	m.viewport.SetContent(content)
 	m.viewport.GotoBottom()
 }
@@ -257,7 +281,11 @@ func (m model) View() string {
 	if m.loading {
 		statusText = fmt.Sprintf("%s %s", m.spinner.View(), m.toolStatus)
 	} else {
-		statusText = fmt.Sprintf("Ready | Messages: %d | Tools: 12 available", len(m.messages)/2)
+		usageInfo := ""
+		if m.totalTokens > 0 {
+			usageInfo = fmt.Sprintf(" | Tokens: %d", m.totalTokens)
+		}
+		statusText = fmt.Sprintf("Ready | Messages: %d%s", len(m.messages)/2, usageInfo)
 	}
 	statusBar := styleStatus.Width(m.width - 2).Render(statusText)
 
