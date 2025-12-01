@@ -148,3 +148,23 @@ func (a *Agent) ClearHistory() {
 		a.History = a.History[:1]
 	}
 }
+
+// SetProvider updates the agent's LLM provider
+func (a *Agent) SetProvider(provider llm.Provider) {
+	a.LLM = provider
+}
+
+// GetConfig returns the current LLM provider's config
+func (a *Agent) GetConfig() llm.Config {
+	if a.LLM != nil {
+		return a.LLM.GetConfig()
+	}
+	return llm.Config{}
+}
+
+// UpdateConfig updates the current LLM provider's config
+func (a *Agent) UpdateConfig(cfg llm.Config) {
+	if a.LLM != nil {
+		a.LLM.UpdateConfig(cfg)
+	}
+}

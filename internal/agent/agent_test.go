@@ -17,6 +17,14 @@ func (m *MockLLM) Generate(messages []llm.Message, tools []tools.Tool) (*llm.Mes
 	return m.Response, m.Err
 }
 
+func (m *MockLLM) UpdateConfig(cfg llm.Config) {
+	// No-op for mock
+}
+
+func (m *MockLLM) GetConfig() llm.Config {
+	return llm.Config{}
+}
+
 func TestAgent_GetResponse_NoLLM(t *testing.T) {
 	agent := New(nil)
 	resp := agent.GetResponse("hello")
