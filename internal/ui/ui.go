@@ -261,6 +261,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case responseMsg:
 		m.loading = false
 		m.toolStatus = ""
+
+		// Show which tools were used
+		if msg.usage != nil && len(msg.usage.ToolsUsed) > 0 {
+			toolMsg := styleStatus.Render(fmt.Sprintf("🔧 Tools used: %s", strings.Join(msg.usage.ToolsUsed, ", ")))
+			m.messages = append(m.messages, toolMsg)
+		}
+
 		m.messages = append(m.messages, styleClippy.Render("Clippy: ")+msg.content)
 		if msg.usage != nil && msg.usage.Usage != nil {
 			m.totalTokens += msg.usage.Usage.TotalTokens

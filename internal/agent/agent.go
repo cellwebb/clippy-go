@@ -9,8 +9,9 @@ import (
 
 // Response represents the agent's full response including usage stats
 type Response struct {
-	Content string
-	Usage   *llm.Usage
+	Content   string
+	Usage     *llm.Usage
+	ToolsUsed []string
 }
 
 // Agent represents our helpful Clippy assistant
@@ -68,6 +69,7 @@ func (a *Agent) GetResponse(input string) Response {
 
 	// Accumulate token usage across all LLM calls
 	totalUsage := &llm.Usage{}
+	var toolsUsed []string
 
 	// Tool execution loop (max 5 turns to prevent infinite loops)
 	for i := 0; i < 5; i++ {
@@ -91,8 +93,9 @@ func (a *Agent) GetResponse(input string) Response {
 		// If no tool calls, return the content
 		if len(resp.ToolCalls) == 0 {
 			return Response{
-				Content: resp.Content,
-				Usage:   totalUsage,
+				Content:   resp.Content,
+				Usage:     totalUsage,
+				ToolsUsed: toolsUsed,
 			}
 		}
 
@@ -100,6 +103,9 @@ func (a *Agent) GetResponse(input string) Response {
 		for _, tc := range resp.ToolCalls {
 			var result string
 			var err error
+
+			// Track tool usage
+			toolsUsed = append(toolsUsed, tc.Name)
 
 			// Find tool
 			var tool tools.Tool
@@ -129,8 +135,9 @@ func (a *Agent) GetResponse(input string) Response {
 	}
 
 	return Response{
-		Content: "I'm stuck in a loop! Too much thinking, not enough RAM.",
-		Usage:   totalUsage,
+		Content:   "I'm stuck in a loop! Too much thinking, not enough RAM.",
+		Usage:     totalUsage,
+		ToolsUsed: toolsUsed,
 	}
 }
 
