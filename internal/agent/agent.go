@@ -2,6 +2,7 @@ package agent
 
 import (
 	"fmt"
+	"reflect"
 
 	"github.com/cellwebb/clippy-go/internal/llm"
 	"github.com/cellwebb/clippy-go/internal/tools"
@@ -70,9 +71,10 @@ func (a *Agent) GetResponse(input string) Response {
 	// Accumulate token usage across all LLM calls
 	totalUsage := &llm.Usage{}
 	var toolsUsed []string
+	var prevToolCalls []llm.ToolCall
 
-	// Tool execution loop (max 5 turns to prevent infinite loops)
-	for i := 0; i < 5; i++ {
+	// Tool execution loop (max 15 turns to prevent infinite loops)
+	for i := 0; i < 50; i++ {
 		resp, err := a.LLM.Generate(a.History, a.Tools)
 		if err != nil {
 			return Response{
@@ -98,6 +100,16 @@ func (a *Agent) GetResponse(input string) Response {
 				ToolsUsed: toolsUsed,
 			}
 		}
+
+		// Check for infinite loops (same tool calls as previous turn)
+		if i > 0 && reflect.DeepEqual(resp.ToolCalls, prevToolCalls) {
+			return Response{
+				Content:   "I'm stuck in a loop! I keep trying to do the same thing over and over. Stopping to save your tokens.",
+				Usage:     totalUsage,
+				ToolsUsed: toolsUsed,
+			}
+		}
+		prevToolCalls = resp.ToolCalls
 
 		// Execute tools
 		for _, tc := range resp.ToolCalls {
@@ -135,7 +147,7 @@ func (a *Agent) GetResponse(input string) Response {
 	}
 
 	return Response{
-		Content:   "I'm stuck in a loop! Too much thinking, not enough RAM.",
+		Content:   "I ran out of moves! (Max steps reached). Try breaking down your request.",
 		Usage:     totalUsage,
 		ToolsUsed: toolsUsed,
 	}
@@ -167,4 +179,14 @@ func (a *Agent) UpdateConfig(cfg llm.Config) {
 	if a.LLM != nil {
 		a.LLM.UpdateConfig(cfg)
 	}
+}
+
+// GetHistory returns the conversation history
+func (a *Agent) GetHistory() []llm.Message {
+	return a.History
+}
+
+// GetToolDefinitions returns the definitions of available tools
+func (a *Agent) GetToolDefinitions() []tools.Tool {
+	return a.Tools
 }

@@ -138,13 +138,32 @@ func TestAgent_ClearHistory(t *testing.T) {
 }
 
 func TestAgent_GetResponse_ToolLoop(t *testing.T) {
-	// This test simulates a tool call followed by a final response
-	// We need a smarter mock that can handle state or sequence of responses
-	// For simplicity, we'll just test that it handles a tool call response correctly
+	// Mock LLM that returns the same tool call repeatedly
+	toolCall := llm.ToolCall{
+		ID:   "call_1",
+		Name: "test_tool",
+		Arguments: map[string]interface{}{
+			"arg": "val",
+		},
+	}
 
-	// Since our simple MockLLM returns the same thing every time,
-	// testing the loop is tricky without a more complex mock.
-	// But we can verify that if the LLM returns a tool call, the agent tries to execute it.
-	// However, without a sequence of responses, it might loop.
-	// Let's stick to basic verification for now.
+	mockResponse := &llm.Message{
+		Role:      "assistant",
+		ToolCalls: []llm.ToolCall{toolCall},
+	}
+
+	mockLLM := &MockLLM{
+		Response: mockResponse,
+	}
+
+	agent := New(mockLLM)
+	// Add a dummy tool so execution doesn't fail
+	// We don't need actual tool execution for this test, just the loop detection
+
+	resp := agent.GetResponse("trigger loop")
+
+	expected := "I'm stuck in a loop! I keep trying to do the same thing over and over. Stopping to save your tokens."
+	if resp.Content != expected {
+		t.Errorf("Expected loop detection message %q, got %q", expected, resp.Content)
+	}
 }
