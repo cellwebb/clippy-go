@@ -37,6 +37,8 @@ type Usage struct {
 // Provider defines the interface for an LLM provider
 type Provider interface {
 	Generate(messages []Message, tools []tools.Tool) (*Message, error)
+	UpdateConfig(cfg Config)
+	GetConfig() Config
 }
 
 // Config holds configuration for LLM providers
@@ -62,6 +64,14 @@ func NewProvider(cfg Config) (Provider, error) {
 // OpenAIProvider implements Provider for OpenAI compatible APIs
 type OpenAIProvider struct {
 	Config Config
+}
+
+func (p *OpenAIProvider) UpdateConfig(cfg Config) {
+	p.Config = cfg
+}
+
+func (p *OpenAIProvider) GetConfig() Config {
+	return p.Config
 }
 
 func (p *OpenAIProvider) Generate(messages []Message, availableTools []tools.Tool) (*Message, error) {
@@ -205,6 +215,14 @@ func (p *OpenAIProvider) Generate(messages []Message, availableTools []tools.Too
 // AnthropicProvider implements Provider for Anthropic APIs
 type AnthropicProvider struct {
 	Config Config
+}
+
+func (p *AnthropicProvider) UpdateConfig(cfg Config) {
+	p.Config = cfg
+}
+
+func (p *AnthropicProvider) GetConfig() Config {
+	return p.Config
 }
 
 func (p *AnthropicProvider) Generate(messages []Message, availableTools []tools.Tool) (*Message, error) {
@@ -360,9 +378,42 @@ func (p *AnthropicProvider) Generate(messages []Message, availableTools []tools.
 // LoadConfigFromEnv loads config from environment variables
 func LoadConfigFromEnv() Config {
 	return Config{
-		APIKey:   os.Getenv("CLIPPY_API_KEY"),
-		BaseURL:  os.Getenv("CLIPPY_BASE_URL"),
-		Model:    os.Getenv("CLIPPY_MODEL"),
-		Provider: os.Getenv("CLIPPY_PROVIDER"),
+		APIKey:  os.Getenv("CLIPPY_API_KEY"),
+		BaseURL: os.Getenv("CLIPPY_BASE_URL"),
+		Model:   os.Getenv("CLIPPY_MODEL"),
 	}
+}
+
+// ModelsDevResponse represents the response from models.dev
+type ModelsDevResponse []struct {
+	Created     int    `json:"created"`
+	Description string `json:"description"`
+	ID          string `json:"id"`
+	Object      string `json:"object"`
+	OwnedBy     string `json:"owned_by"`
+}
+
+// FetchModels retrieves the list of available models from models.dev
+func FetchModels() ([]string, error) {
+	resp, err := http.Get("https://models.dev/api/models")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to fetch models: %s", resp.Status)
+	}
+
+	var modelsResp ModelsDevResponse
+	if err := json.NewDecoder(resp.Body).Decode(&modelsResp); err != nil {
+		return nil, err
+	}
+
+	var models []string
+	for _, m := range modelsResp {
+		models = append(models, m.ID)
+	}
+
+	return models, nil
 }
