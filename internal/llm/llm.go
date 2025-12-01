@@ -7,11 +7,28 @@ import (
 	"io"
 	"net/http"
 	"os"
+
+	"github.com/cellwebb/clippy-go/internal/tools"
 )
+
+// ToolCall represents a request from the LLM to execute a tool
+type ToolCall struct {
+	ID        string                 `json:"id"`
+	Name      string                 `json:"name"`
+	Arguments map[string]interface{} `json:"arguments"`
+}
+
+// Message represents a chat message
+type Message struct {
+	Role       string     `json:"role"`
+	Content    string     `json:"content"`
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string     `json:"tool_call_id,omitempty"` // For tool responses
+}
 
 // Provider defines the interface for an LLM provider
 type Provider interface {
-	Generate(prompt string, systemPrompt string) (string, error)
+	Generate(messages []Message, tools []tools.Tool) (*Message, error)
 }
 
 // Config holds configuration for LLM providers
@@ -39,28 +56,73 @@ type OpenAIProvider struct {
 	Config Config
 }
 
-func (p *OpenAIProvider) Generate(prompt string, systemPrompt string) (string, error) {
+func (p *OpenAIProvider) Generate(messages []Message, availableTools []tools.Tool) (*Message, error) {
 	url := p.Config.BaseURL + "/chat/completions"
 	if p.Config.BaseURL == "" {
 		url = "https://api.openai.com/v1/chat/completions"
 	}
 
+	// Convert internal messages to OpenAI format
+	apiMessages := make([]map[string]interface{}, len(messages))
+	for i, msg := range messages {
+		m := map[string]interface{}{
+			"role":    msg.Role,
+			"content": msg.Content,
+		}
+		if len(msg.ToolCalls) > 0 {
+			toolCalls := make([]map[string]interface{}, len(msg.ToolCalls))
+			for j, tc := range msg.ToolCalls {
+				argsJSON, _ := json.Marshal(tc.Arguments)
+				toolCalls[j] = map[string]interface{}{
+					"id":   tc.ID,
+					"type": "function",
+					"function": map[string]interface{}{
+						"name":      tc.Name,
+						"arguments": string(argsJSON),
+					},
+				}
+			}
+			m["tool_calls"] = toolCalls
+		}
+		if msg.ToolCallID != "" {
+			m["tool_call_id"] = msg.ToolCallID
+		}
+		apiMessages[i] = m
+	}
+
+	// Convert tools to OpenAI format
+	var apiTools []map[string]interface{}
+	if len(availableTools) > 0 {
+		apiTools = make([]map[string]interface{}, len(availableTools))
+		for i, t := range availableTools {
+			def := t.Definition()
+			apiTools[i] = map[string]interface{}{
+				"type": "function",
+				"function": map[string]interface{}{
+					"name":        def.Name,
+					"description": def.Description,
+					"parameters":  def.Parameters,
+				},
+			}
+		}
+	}
+
 	reqBody := map[string]interface{}{
-		"model": p.Config.Model,
-		"messages": []map[string]string{
-			{"role": "system", "content": systemPrompt},
-			{"role": "user", "content": prompt},
-		},
+		"model":    p.Config.Model,
+		"messages": apiMessages,
+	}
+	if len(apiTools) > 0 {
+		reqBody["tools"] = apiTools
 	}
 
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -69,32 +131,57 @@ func (p *OpenAIProvider) Generate(prompt string, systemPrompt string) (string, e
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("API error: %s - %s", resp.Status, string(body))
+		return nil, fmt.Errorf("API error: %s - %s", resp.Status, string(body))
 	}
 
 	var result struct {
 		Choices []struct {
 			Message struct {
-				Content string `json:"content"`
+				Content   string `json:"content"`
+				ToolCalls []struct {
+					ID       string `json:"id"`
+					Function struct {
+						Name      string `json:"name"`
+						Arguments string `json:"arguments"`
+					} `json:"function"`
+				} `json:"tool_calls"`
 			} `json:"message"`
 		} `json:"choices"`
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", err
+		return nil, err
 	}
 
 	if len(result.Choices) == 0 {
-		return "", fmt.Errorf("no response from API")
+		return nil, fmt.Errorf("no response from API")
 	}
 
-	return result.Choices[0].Message.Content, nil
+	choice := result.Choices[0].Message
+	responseMsg := &Message{
+		Role:    "assistant",
+		Content: choice.Content,
+	}
+
+	if len(choice.ToolCalls) > 0 {
+		for _, tc := range choice.ToolCalls {
+			var args map[string]interface{}
+			json.Unmarshal([]byte(tc.Function.Arguments), &args)
+			responseMsg.ToolCalls = append(responseMsg.ToolCalls, ToolCall{
+				ID:        tc.ID,
+				Name:      tc.Function.Name,
+				Arguments: args,
+			})
+		}
+	}
+
+	return responseMsg, nil
 }
 
 // AnthropicProvider implements Provider for Anthropic APIs
@@ -102,29 +189,92 @@ type AnthropicProvider struct {
 	Config Config
 }
 
-func (p *AnthropicProvider) Generate(prompt string, systemPrompt string) (string, error) {
+func (p *AnthropicProvider) Generate(messages []Message, availableTools []tools.Tool) (*Message, error) {
 	url := p.Config.BaseURL + "/v1/messages"
 	if p.Config.BaseURL == "" {
 		url = "https://api.anthropic.com/v1/messages"
 	}
 
+	// Convert internal messages to Anthropic format
+	var systemPrompt string
+	var apiMessages []map[string]interface{}
+
+	for _, msg := range messages {
+		if msg.Role == "system" {
+			systemPrompt = msg.Content
+			continue
+		}
+
+		m := map[string]interface{}{
+			"role": msg.Role,
+		}
+
+		if len(msg.ToolCalls) > 0 {
+			content := []map[string]interface{}{}
+			if msg.Content != "" {
+				content = append(content, map[string]interface{}{
+					"type": "text",
+					"text": msg.Content,
+				})
+			}
+			for _, tc := range msg.ToolCalls {
+				content = append(content, map[string]interface{}{
+					"type":  "tool_use",
+					"id":    tc.ID,
+					"name":  tc.Name,
+					"input": tc.Arguments,
+				})
+			}
+			m["content"] = content
+		} else if msg.ToolCallID != "" {
+			m["content"] = []map[string]interface{}{
+				{
+					"type":        "tool_result",
+					"tool_use_id": msg.ToolCallID,
+					"content":     msg.Content,
+				},
+			}
+		} else {
+			m["content"] = msg.Content
+		}
+
+		apiMessages = append(apiMessages, m)
+	}
+
+	// Convert tools to Anthropic format
+	var apiTools []map[string]interface{}
+	if len(availableTools) > 0 {
+		apiTools = make([]map[string]interface{}, len(availableTools))
+		for i, t := range availableTools {
+			def := t.Definition()
+			apiTools[i] = map[string]interface{}{
+				"name":         def.Name,
+				"description":  def.Description,
+				"input_schema": def.Parameters,
+			}
+		}
+	}
+
 	reqBody := map[string]interface{}{
 		"model":      p.Config.Model,
 		"max_tokens": 1024,
-		"system":     systemPrompt,
-		"messages": []map[string]string{
-			{"role": "user", "content": prompt},
-		},
+		"messages":   apiMessages,
+	}
+	if systemPrompt != "" {
+		reqBody["system"] = systemPrompt
+	}
+	if len(apiTools) > 0 {
+		reqBody["tools"] = apiTools
 	}
 
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -134,30 +284,50 @@ func (p *AnthropicProvider) Generate(prompt string, systemPrompt string) (string
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("API error: %s - %s", resp.Status, string(body))
+		return nil, fmt.Errorf("API error: %s - %s", resp.Status, string(body))
 	}
 
 	var result struct {
 		Content []struct {
-			Text string `json:"text"`
+			Type  string                 `json:"type"`
+			Text  string                 `json:"text"`
+			ID    string                 `json:"id"`
+			Name  string                 `json:"name"`
+			Input map[string]interface{} `json:"input"`
 		} `json:"content"`
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", err
+		return nil, err
 	}
 
 	if len(result.Content) == 0 {
-		return "", fmt.Errorf("no response from API")
+		return nil, fmt.Errorf("no response from API")
 	}
 
-	return result.Content[0].Text, nil
+	responseMsg := &Message{
+		Role: "assistant",
+	}
+
+	for _, c := range result.Content {
+		if c.Type == "text" {
+			responseMsg.Content += c.Text
+		} else if c.Type == "tool_use" {
+			responseMsg.ToolCalls = append(responseMsg.ToolCalls, ToolCall{
+				ID:        c.ID,
+				Name:      c.Name,
+				Arguments: c.Input,
+			})
+		}
+	}
+
+	return responseMsg, nil
 }
 
 // LoadConfigFromEnv loads config from environment variables
