@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/cellwebb/clippy-go/internal/agent"
+	"github.com/cellwebb/clippy-go/internal/llm"
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -93,7 +94,7 @@ type model struct {
 }
 
 var availableCommands = []string{
-	"/quit", "/exit", "/clear", "/new", "/reset", "/help",
+	"/quit", "/exit", "/clear", "/new", "/reset", "/help", "/provider", "/model",
 }
 
 func InitialModel(agt *agent.Agent) model {
@@ -252,6 +253,44 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.agent.ClearHistory()
 				return m, nil
 			}
+
+			if strings.HasPrefix(input, "/provider") {
+				parts := strings.Fields(input)
+				if len(parts) > 1 {
+					provider := parts[1]
+					// Update provider
+					cfg := m.agent.GetConfig()
+					cfg.Provider = provider
+					m.agent.UpdateConfig(cfg)
+					m.messages = append(m.messages, styleStatus.Render(fmt.Sprintf("[⚙️] Provider set to: %s", provider)))
+				} else {
+					// List providers
+					m.messages = append(m.messages, styleStatus.Render("[⚙️] Available providers: openai, anthropic"))
+				}
+				m.textInput.SetValue("")
+				m.updateViewport()
+				return m, nil
+			}
+
+			if strings.HasPrefix(input, "/model") {
+				parts := strings.Fields(input)
+				if len(parts) > 1 {
+					modelName := parts[1]
+					// Update model
+					cfg := m.agent.GetConfig()
+					cfg.Model = modelName
+					m.agent.UpdateConfig(cfg)
+					m.messages = append(m.messages, styleStatus.Render(fmt.Sprintf("[⚙️] Model set to: %s", modelName)))
+					m.textInput.SetValue("")
+					m.updateViewport()
+					return m, nil
+				} else {
+					// Fetch models
+					m.loading = true
+					m.toolStatus = "Fetching models..."
+					return m, tea.Batch(m.spinner.Tick, fetchModelsCmd())
+				}
+			}
 			if input == "/help" {
 				m.showHelp = !m.showHelp
 				m.textInput.SetValue("")
@@ -275,6 +314,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.updateSuggestions()
 			return m, cmd
 		}
+
+	case modelsMsg:
+		m.loading = false
+		m.toolStatus = ""
+		if msg.err != nil {
+			m.messages = append(m.messages, styleStatus.Render(fmt.Sprintf("[❌] Error fetching models: %v", msg.err)))
+		} else {
+			m.messages = append(m.messages, styleStatus.Render(fmt.Sprintf("[⚙️] Available models: %s", strings.Join(msg.models, ", "))))
+		}
+		m.updateViewport()
+		return m, nil
 
 	case responseMsg:
 		m.loading = false
@@ -459,4 +509,16 @@ func (m model) View() string {
 		inputBox,
 		footer,
 	)
+}
+
+type modelsMsg struct {
+	models []string
+	err    error
+}
+
+func fetchModelsCmd() tea.Cmd {
+	return func() tea.Msg {
+		models, err := llm.FetchModels()
+		return modelsMsg{models: models, err: err}
+	}
 }
