@@ -94,7 +94,7 @@ type model struct {
 }
 
 var availableCommands = []string{
-	"/quit", "/exit", "/clear", "/new", "/reset", "/help", "/provider", "/model",
+	"/quit", "/exit", "/clear", "/new", "/reset", "/help", "/provider", "/model", "/status",
 }
 
 func InitialModel(agt *agent.Agent) model {
@@ -296,6 +296,174 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.textInput.SetValue("")
 				return m, nil
 			}
+			
+			if input == "/status" {
+				// Get config status
+				cfg := m.agent.GetConfig()
+				statusMsg := fmt.Sprintf("\n%s[⚙️] CONFIG STATUS%s\n", styleHeader.Render(""), styleHeader.Render(""))
+				statusMsg += fmt.Sprintf("%sProvider: %s\n", styleStatus.Render("  "), styleClippy.Render(cfg.Provider))
+				statusMsg += fmt.Sprintf("%sModel: %s\n", styleStatus.Render("  "), styleClippy.Render(cfg.Model))
+				if cfg.BaseURL != "" {
+					statusMsg += fmt.Sprintf("%sBase URL: %s\n", styleStatus.Render("  "), styleClippy.Render(cfg.BaseURL))
+				} else {
+					if cfg.Provider == "openai" {
+						statusMsg += fmt.Sprintf("%sBase URL: %s\n", styleStatus.Render("  "), styleClippy.Render("https://api.openai.com/v1"))
+					} else if cfg.Provider == "anthropic" {
+						statusMsg += fmt.Sprintf("%sBase URL: %s\n", styleStatus.Render("  "), styleClippy.Render("https://api.anthropic.com/v1"))
+					} else {
+						statusMsg += fmt.Sprintf("%sBase URL: %s\n", styleStatus.Render("  "), styleClippy.Render("default"))
+					}
+				}
+				if cfg.APIKey != "" {
+					statusMsg += fmt.Sprintf("%sAPI Key: %s (%s...%s)\n", styleStatus.Render("  "), styleClippy.Render("***configured***"), cfg.APIKey[:4], cfg.APIKey[len(cfg.APIKey)-4:])
+				} else {
+					statusMsg += fmt.Sprintf("%sAPI Key: %s\n", styleStatus.Render("  "), styleClippy.Render("not set"))
+				}
+				
+				// Message breakdown
+				statusMsg += fmt.Sprintf("\n%s[📊] MESSAGE BREAKDOWN%s\n", styleHeader.Render(""), styleHeader.Render(""))
+				
+				systemCount := 0
+				userCount := 0
+				assistantCount := 0
+				toolCount := 0
+				systemTokens := 0
+				userTokens := 0
+				assistantTokens := 0
+				toolTokens := 0
+				
+				for _, msg := range m.agent.GetHistory() {
+					switch msg.Role {
+					case "system":
+						systemCount++
+						if msg.Usage != nil {
+							systemTokens += msg.Usage.TotalTokens
+						}
+					case "user":
+						userCount++
+						if msg.Usage != nil {
+							userTokens += msg.Usage.TotalTokens
+						}
+					case "assistant":
+						assistantCount++
+						if msg.Usage != nil {
+							assistantTokens += msg.Usage.TotalTokens
+						}
+					case "tool":
+						toolCount++
+						if msg.Usage != nil {
+							toolTokens += msg.Usage.TotalTokens
+						}
+					}
+				}
+				
+				statusMsg += fmt.Sprintf("%sSystem messages: %s%d%s (%s%d%s tokens)\n", 
+					styleStatus.Render("  "), stylePrompt.Render(""), systemCount, styleStatus.Render(""), 
+					styleHeader.Render(""), systemTokens, styleStatus.Render(""))
+				statusMsg += fmt.Sprintf("%sUser messages: %s%d%s (%s%d%s tokens)\n", 
+					styleStatus.Render("  "), styleUser.Render(""), userCount, styleStatus.Render(""), 
+					styleHeader.Render(""), userTokens, styleStatus.Render(""))
+				statusMsg += fmt.Sprintf("%sAssistant messages: %s%d%s (%s%d%s tokens)\n", 
+					styleStatus.Render("  "), styleClippy.Render(""), assistantCount, styleStatus.Render(""), 
+					styleHeader.Render(""), assistantTokens, styleStatus.Render(""))
+				statusMsg += fmt.Sprintf("%sTool calls/responses: %s%d%s (%s%d%s tokens)\n", 
+					styleStatus.Render("  "), stylePrompt.Render(""), toolCount, styleStatus.Render(""), 
+					styleHeader.Render(""), toolTokens, styleStatus.Render(""))
+				statusMsg += fmt.Sprintf("%sTotal messages: %s%d%s\n", styleStatus.Render("  "), styleHeader.Render(""), len(m.agent.GetHistory()), styleStatus.Render(""))
+				
+				// Token usage
+				statusMsg += fmt.Sprintf("\n%s[🪙] TOKEN USAGE%s\n", styleHeader.Render(""), styleHeader.Render(""))
+				if m.totalTokens > 0 {
+					if m.lastUsage != nil && m.lastUsage.Usage != nil {
+						statusMsg += fmt.Sprintf("%sLast call - Prompt: %s%d%s | Completion: %s%d%s | Total: %s%d%s\n", 
+							styleStatus.Render("  "), 
+							stylePrompt.Render(""), m.lastUsage.Usage.PromptTokens, styleStatus.Render(""),
+							styleClippy.Render(""), m.lastUsage.Usage.CompletionTokens, styleStatus.Render(""),
+							styleHeader.Render(""), m.lastUsage.Usage.TotalTokens, styleStatus.Render(""))
+					}
+					statusMsg += fmt.Sprintf("%sSession total: %s%d%s tokens\n", 
+						styleStatus.Render("  "), 
+						styleHeader.Render(""), m.totalTokens, styleStatus.Render(""))
+					
+					// Calculate average tokens per message
+					if userCount > 0 {
+						avgTokens := m.totalTokens / userCount
+						statusMsg += fmt.Sprintf("%sAverage per exchange: %s%d%s tokens\n", 
+							styleStatus.Render("  "), styleHeader.Render(""), avgTokens, styleStatus.Render(""))
+					}
+					
+					// estimated cost (rough calculations)
+					var estimatedCost string
+					if cfg.Provider == "openai" {
+						// Rough estimates for GPT-4
+						cost := float64(m.totalTokens) * 0.00003 // $0.03 per 1K tokens
+						estimatedCost = fmt.Sprintf("$%.4f", cost)
+					} else if cfg.Provider == "anthropic" {
+						// Rough estimates for Claude
+						cost := float64(m.totalTokens) * 0.00003 // $0.03 per 1K tokens
+						estimatedCost = fmt.Sprintf("$%.4f", cost)
+					} else {
+						estimatedCost = "unknown"
+					}
+					statusMsg += fmt.Sprintf("%sEstimated cost: %s%s%s\n", 
+						styleStatus.Render("  "), styleHeader.Render(""), estimatedCost, styleStatus.Render(""))
+				} else {
+					statusMsg += fmt.Sprintf("%sNo tokens used yet in this session\n", styleStatus.Render("  "))
+				}
+				
+				// Last tools used
+				if m.lastUsage != nil && len(m.lastUsage.ToolsUsed) > 0 {
+					statusMsg += fmt.Sprintf("\n%s[🔧] RECENT TOOLS%s\n", styleHeader.Render(""), styleHeader.Render(""))
+					statusMsg += fmt.Sprintf("%sLast used: %s\n", styleStatus.Render("  "), styleClippy.Render(strings.Join(m.lastUsage.ToolsUsed, ", ")))
+					
+					// Count tool usage frequency
+					toolUsage := make(map[string]int)
+					for _, msg := range m.agent.GetHistory() {
+						if msg.Role == "tool" {
+							// Extract tool name from content if possible, or track by tool call
+							for _, tc := range msg.ToolCalls {
+								toolUsage[tc.Name]++
+							}
+						}
+					}
+					
+					if len(toolUsage) > 0 {
+						statusMsg += fmt.Sprintf("%sUsage frequency: ", styleStatus.Render("  "))
+						var toolFreq []string
+						for tool, count := range toolUsage {
+							toolFreq = append(toolFreq, fmt.Sprintf("%s%s:%d", styleClippy.Render(tool), styleStatus.Render(""), count))
+						}
+						statusMsg += strings.Join(toolFreq, " | ") + "\n"
+					}
+				}
+				
+				// Available tools count
+				statusMsg += fmt.Sprintf("\n%s[🛠️] TOOLS AVAILABLE%s\n", styleHeader.Render(""), styleHeader.Render(""))
+				toolDefs := m.agent.GetToolDefinitions()
+				statusMsg += fmt.Sprintf("%sTotal tools: %s%d%s\n", styleStatus.Render("  "), stylePrompt.Render(""), len(toolDefs), styleStatus.Render(""))
+				
+				// List available tools
+				statusMsg += fmt.Sprintf("%sAvailable: ", styleStatus.Render("  "))
+				var toolNames []string
+				for _, tool := range toolDefs {
+					toolNames = append(toolNames, tool.Definition().Name)
+				}
+				statusMsg += styleClippy.Render(strings.Join(toolNames, ", ")) + "\n"
+				
+				// Session stats
+				statusMsg += fmt.Sprintf("\n%s[📈] SESSION STATS%s\n", styleHeader.Render(""), styleHeader.Render(""))
+				statusMsg += fmt.Sprintf("%sSession duration: %sActive%s\n", styleStatus.Render("  "), styleClippy.Render(""), styleStatus.Render(""))
+				if m.agent.LLM != nil {
+					statusMsg += fmt.Sprintf("%sLLM Status: %sConnected%s\n", styleStatus.Render("  "), styleClippy.Render(""), styleStatus.Render(""))
+				} else {
+					statusMsg += fmt.Sprintf("%sLLM Status: %sNot configured%s\n", styleStatus.Render("  "), stylePrompt.Render(""), styleStatus.Render(""))
+				}
+				
+				m.messages = append(m.messages, statusMsg)
+				m.textInput.SetValue("")
+				m.updateViewport()
+				return m, nil
+			}
 
 			// Add user message
 			m.messages = append(m.messages, styleUser.Render("[You] ")+input)
@@ -484,9 +652,9 @@ func (m model) View() string {
 	// Footer
 	var footerText string
 	if m.showHelp {
-		footerText = "Commands: /quit /exit /clear /new /reset /help | Keys: ? (help) ctrl+c (quit)"
+		footerText = "Commands: /quit /exit /clear /new /reset /help /status | Keys: ? (help) ctrl+c (quit)"
 	} else {
-		footerText = "/quit /clear /help | ? for more help | ctrl+c to exit"
+		footerText = "/quit /clear /help /status | ? for more help | ctrl+c to exit"
 	}
 	footer := styleFooter.Width(m.width - 2).Render(footerText)
 
