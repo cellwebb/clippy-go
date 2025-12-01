@@ -52,6 +52,83 @@ func TestAgent_GetResponse_WithLLM(t *testing.T) {
 	}
 }
 
+func TestAgent_HistoryInitialization(t *testing.T) {
+	agent := New(nil)
+
+	if len(agent.History) != 1 {
+		t.Errorf("Expected history to have 1 message (system prompt), got %d", len(agent.History))
+	}
+
+	if agent.History[0].Role != "system" {
+		t.Errorf("Expected first message to be system role, got %s", agent.History[0].Role)
+	}
+}
+
+func TestAgent_HistoryPersistence(t *testing.T) {
+	mockLLM := &MockLLM{
+		Response: &llm.Message{
+			Role:    "assistant",
+			Content: "Response 1",
+		},
+	}
+
+	agent := New(mockLLM)
+
+	// First message
+	agent.GetResponse("Hello")
+
+	// Should have: system, user, assistant
+	if len(agent.History) != 3 {
+		t.Errorf("Expected 3 messages in history, got %d", len(agent.History))
+	}
+
+	// Second message
+	mockLLM.Response.Content = "Response 2"
+	agent.GetResponse("How are you?")
+
+	// Should have: system, user1, assistant1, user2, assistant2
+	if len(agent.History) != 5 {
+		t.Errorf("Expected 5 messages in history, got %d", len(agent.History))
+	}
+
+	// Verify order
+	if agent.History[1].Role != "user" || agent.History[1].Content != "Hello" {
+		t.Error("First user message not preserved correctly")
+	}
+	if agent.History[3].Role != "user" || agent.History[3].Content != "How are you?" {
+		t.Error("Second user message not preserved correctly")
+	}
+}
+
+func TestAgent_ClearHistory(t *testing.T) {
+	mockLLM := &MockLLM{
+		Response: &llm.Message{
+			Role:    "assistant",
+			Content: "Test response",
+		},
+	}
+
+	agent := New(mockLLM)
+	agent.GetResponse("Test message")
+
+	// Should have multiple messages
+	if len(agent.History) <= 1 {
+		t.Error("History should have more than just system prompt")
+	}
+
+	// Clear history
+	agent.ClearHistory()
+
+	// Should only have system prompt
+	if len(agent.History) != 1 {
+		t.Errorf("Expected 1 message after clear (system prompt), got %d", len(agent.History))
+	}
+
+	if agent.History[0].Role != "system" {
+		t.Error("System prompt should remain after clear")
+	}
+}
+
 func TestAgent_GetResponse_ToolLoop(t *testing.T) {
 	// This test simulates a tool call followed by a final response
 	// We need a smarter mock that can handle state or sequence of responses
