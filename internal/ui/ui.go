@@ -231,6 +231,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.messages = []string{}
 				m.textInput.SetValue("")
 				m.viewport.SetContent("")
+				m.agent.ClearHistory()
 				return m, nil
 			}
 			if input == "/help" {
