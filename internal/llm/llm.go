@@ -235,9 +235,36 @@ func (p *AnthropicProvider) Generate(messages []Message, availableTools []tools.
 	var systemPrompt string
 	var apiMessages []map[string]interface{}
 
-	for _, msg := range messages {
+	for i := 0; i < len(messages); i++ {
+		msg := messages[i]
+
 		if msg.Role == "system" {
 			systemPrompt = msg.Content
+			continue
+		}
+
+		// Handle tool results (Role: "tool")
+		// Anthropic expects tool results to be in a "user" message.
+		// If there are multiple consecutive tool results, they must be in a single user message.
+		if msg.Role == "tool" {
+			content := []map[string]interface{}{}
+
+			// Collect this and subsequent tool messages
+			for i < len(messages) && messages[i].Role == "tool" {
+				toolMsg := messages[i]
+				content = append(content, map[string]interface{}{
+					"type":        "tool_result",
+					"tool_use_id": toolMsg.ToolCallID,
+					"content":     toolMsg.Content,
+				})
+				i++
+			}
+			i-- // Decrement because the outer loop will increment
+
+			apiMessages = append(apiMessages, map[string]interface{}{
+				"role":    "user",
+				"content": content,
+			})
 			continue
 		}
 
@@ -262,14 +289,6 @@ func (p *AnthropicProvider) Generate(messages []Message, availableTools []tools.
 				})
 			}
 			m["content"] = content
-		} else if msg.ToolCallID != "" {
-			m["content"] = []map[string]interface{}{
-				{
-					"type":        "tool_result",
-					"tool_use_id": msg.ToolCallID,
-					"content":     msg.Content,
-				},
-			}
 		} else {
 			m["content"] = msg.Content
 		}
@@ -378,9 +397,10 @@ func (p *AnthropicProvider) Generate(messages []Message, availableTools []tools.
 // LoadConfigFromEnv loads config from environment variables
 func LoadConfigFromEnv() Config {
 	return Config{
-		APIKey:  os.Getenv("CLIPPY_API_KEY"),
-		BaseURL: os.Getenv("CLIPPY_BASE_URL"),
-		Model:   os.Getenv("CLIPPY_MODEL"),
+		APIKey:   os.Getenv("CLIPPY_API_KEY"),
+		BaseURL:  os.Getenv("CLIPPY_BASE_URL"),
+		Model:    os.Getenv("CLIPPY_MODEL"),
+		Provider: os.Getenv("CLIPPY_PROVIDER"),
 	}
 }
 
