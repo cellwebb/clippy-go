@@ -5,7 +5,7 @@ import (
 
 	"github.com/cellwebb/clippy-go/internal/agent"
 	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbletea"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -28,12 +28,12 @@ var (
 )
 
 type model struct {
-	agent     *agent.Agent
-	messages  []string
-	input     string
-	quitting  bool
-	spinner   spinner.Model
-	loading   bool
+	agent    *agent.Agent
+	messages []string
+	input    string
+	quitting bool
+	spinner  spinner.Model
+	loading  bool
 }
 
 func InitialModel(agt *agent.Agent) model {
@@ -75,9 +75,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.input == "" {
 				return m, nil
 			}
+
+			// Handle slash commands
+			if m.input == "/quit" || m.input == "/exit" {
+				m.quitting = true
+				return m, tea.Quit
+			}
+			if m.input == "/clear" || m.input == "/new" || m.input == "/reset" {
+				m.messages = []string{}
+				m.input = ""
+				return m, nil
+			}
+
 			// Add user message
 			m.messages = append(m.messages, styleUser.Render("You: ")+m.input)
-			
+
 			cmd := m.getAgentResponse(m.input)
 			m.input = ""
 			m.loading = true
@@ -121,7 +133,7 @@ func (m model) View() string {
   || |
   |__|
   `
-	
+
 	// Header
 	header := styleBorder.Render(
 		lipgloss.JoinVertical(lipgloss.Center,
