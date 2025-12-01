@@ -7,6 +7,12 @@ import (
 	"github.com/cellwebb/clippy-go/internal/tools"
 )
 
+// Response represents the agent's full response including usage stats
+type Response struct {
+	Content string
+	Usage   *llm.Usage
+}
+
 // Agent represents our helpful Clippy assistant
 type Agent struct {
 	Name  string
@@ -40,10 +46,12 @@ func New(llmProvider llm.Provider) *Agent {
 }
 
 // GetResponse generates a response based on user input
-func (a *Agent) GetResponse(input string) string {
+func (a *Agent) GetResponse(input string) Response {
 	// Check if LLM is configured
 	if a.LLM == nil {
-		return "I have no brain! Please configure the LLM provider in your .env file so I can think."
+		return Response{
+			Content: "I have no brain! Please configure the LLM provider in your .env file so I can think.",
+		}
 	}
 
 	systemPrompt := "You are Clippy, the helpful Microsoft Office assistant, but with a Vaporwave aesthetic. You are helpful, slightly annoying, and make corny coding jokes. You love the 80s/90s aesthetic, synthwave music, and neon colors. Keep your responses concise and fun. You have access to tools to: read files, write files, edit files, list directories, search files, create directories, delete files, move/rename files, append to files, read specific file lines, get current directory, and run shell commands. Use them to help users with coding tasks."
@@ -53,18 +61,33 @@ func (a *Agent) GetResponse(input string) string {
 		{Role: "user", Content: input},
 	}
 
+	// Accumulate token usage across all LLM calls
+	totalUsage := &llm.Usage{}
+
 	// Tool execution loop (max 5 turns to prevent infinite loops)
 	for i := 0; i < 5; i++ {
 		resp, err := a.LLM.Generate(messages, a.Tools)
 		if err != nil {
-			return fmt.Sprintf("Error contacting the mainframe: %v", err)
+			return Response{
+				Content: fmt.Sprintf("Error contacting the mainframe: %v", err),
+			}
+		}
+
+		// Accumulate usage
+		if resp.Usage != nil {
+			totalUsage.PromptTokens += resp.Usage.PromptTokens
+			totalUsage.CompletionTokens += resp.Usage.CompletionTokens
+			totalUsage.TotalTokens += resp.Usage.TotalTokens
 		}
 
 		messages = append(messages, *resp)
 
 		// If no tool calls, return the content
 		if len(resp.ToolCalls) == 0 {
-			return resp.Content
+			return Response{
+				Content: resp.Content,
+				Usage:   totalUsage,
+			}
 		}
 
 		// Execute tools
@@ -99,5 +122,8 @@ func (a *Agent) GetResponse(input string) string {
 		}
 	}
 
-	return "I'm stuck in a loop! Too much thinking, not enough RAM."
+	return Response{
+		Content: "I'm stuck in a loop! Too much thinking, not enough RAM.",
+		Usage:   totalUsage,
+	}
 }

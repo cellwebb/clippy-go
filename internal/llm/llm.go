@@ -24,6 +24,14 @@ type Message struct {
 	Content    string     `json:"content"`
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"` // For tool responses
+	Usage      *Usage     `json:"usage,omitempty"`        // Token usage stats
+}
+
+// Usage represents token usage statistics
+type Usage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
 }
 
 // Provider defines the interface for an LLM provider
@@ -153,6 +161,11 @@ func (p *OpenAIProvider) Generate(messages []Message, availableTools []tools.Too
 				} `json:"tool_calls"`
 			} `json:"message"`
 		} `json:"choices"`
+		Usage struct {
+			PromptTokens     int `json:"prompt_tokens"`
+			CompletionTokens int `json:"completion_tokens"`
+			TotalTokens      int `json:"total_tokens"`
+		} `json:"usage"`
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
@@ -167,6 +180,11 @@ func (p *OpenAIProvider) Generate(messages []Message, availableTools []tools.Too
 	responseMsg := &Message{
 		Role:    "assistant",
 		Content: choice.Content,
+		Usage: &Usage{
+			PromptTokens:     result.Usage.PromptTokens,
+			CompletionTokens: result.Usage.CompletionTokens,
+			TotalTokens:      result.Usage.TotalTokens,
+		},
 	}
 
 	if len(choice.ToolCalls) > 0 {
@@ -301,6 +319,10 @@ func (p *AnthropicProvider) Generate(messages []Message, availableTools []tools.
 			Name  string                 `json:"name"`
 			Input map[string]interface{} `json:"input"`
 		} `json:"content"`
+		Usage struct {
+			InputTokens  int `json:"input_tokens"`
+			OutputTokens int `json:"output_tokens"`
+		} `json:"usage"`
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
@@ -313,6 +335,11 @@ func (p *AnthropicProvider) Generate(messages []Message, availableTools []tools.
 
 	responseMsg := &Message{
 		Role: "assistant",
+		Usage: &Usage{
+			PromptTokens:     result.Usage.InputTokens,
+			CompletionTokens: result.Usage.OutputTokens,
+			TotalTokens:      result.Usage.InputTokens + result.Usage.OutputTokens,
+		},
 	}
 
 	for _, c := range result.Content {
