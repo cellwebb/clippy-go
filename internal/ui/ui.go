@@ -210,12 +210,30 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "enter":
 			input := m.textInput.Value()
+
+			// If suggestions are showing but input already matches exactly, execute it
 			if len(m.suggestions) > 0 {
-				m.textInput.SetValue(m.suggestions[m.suggestionIdx])
+				// Check if input is already an exact match
+				isExactMatch := false
+				for _, cmd := range availableCommands {
+					if input == cmd {
+						isExactMatch = true
+						break
+					}
+				}
+
+				// If not an exact match, select the suggestion
+				if !isExactMatch {
+					m.textInput.SetValue(m.suggestions[m.suggestionIdx])
+					m.suggestions = nil
+					m.suggestionIdx = 0
+					m.updateSuggestions()
+					return m, nil
+				}
+
+				// If exact match, clear suggestions and continue to execute
 				m.suggestions = nil
 				m.suggestionIdx = 0
-				m.updateSuggestions()
-				return m, nil
 			}
 
 			if input == "" {
