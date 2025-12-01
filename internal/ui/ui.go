@@ -72,21 +72,27 @@ var keys = keyMap{
 }
 
 type model struct {
-	agent       *agent.Agent
-	viewport    viewport.Model
-	help        help.Model
-	messages    []string
-	input       string
-	quitting    bool
-	spinner     spinner.Model
-	loading     bool
-	width       int
-	height      int
-	ready       bool
-	toolStatus  string
-	showHelp    bool
-	lastUsage   *agent.Response
-	totalTokens int
+	agent         *agent.Agent
+	viewport      viewport.Model
+	help          help.Model
+	messages      []string
+	input         string
+	quitting      bool
+	spinner       spinner.Model
+	loading       bool
+	width         int
+	height        int
+	ready         bool
+	toolStatus    string
+	showHelp      bool
+	lastUsage     *agent.Response
+	totalTokens   int
+	suggestions   []string
+	suggestionIdx int
+}
+
+var availableCommands = []string{
+	"/quit", "/exit", "/clear", "/new", "/reset", "/help",
 }
 
 func InitialModel(agt *agent.Agent) model {
@@ -160,7 +166,35 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "?":
 			m.showHelp = !m.showHelp
+		case "up":
+			if len(m.suggestions) > 0 {
+				m.suggestionIdx--
+				if m.suggestionIdx < 0 {
+					m.suggestionIdx = len(m.suggestions) - 1
+				}
+			}
+		case "down":
+			if len(m.suggestions) > 0 {
+				m.suggestionIdx++
+				if m.suggestionIdx >= len(m.suggestions) {
+					m.suggestionIdx = 0
+				}
+			}
+		case "tab":
+			if len(m.suggestions) > 0 {
+				m.input = m.suggestions[m.suggestionIdx]
+				m.suggestions = nil
+				m.suggestionIdx = 0
+			}
+
 		case "enter":
+			if len(m.suggestions) > 0 {
+				m.input = m.suggestions[m.suggestionIdx]
+				m.suggestions = nil
+				m.suggestionIdx = 0
+				return m, nil
+			}
+
 			if m.input == "" {
 				return m, nil
 			}
@@ -196,10 +230,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if len(m.input) > 0 {
 				m.input = m.input[:len(m.input)-1]
 			}
+			m.updateSuggestions()
 
 		default:
 			// Regular typing
 			m.input += msg.String()
+			m.updateSuggestions()
 		}
 
 	case responseMsg:
@@ -223,6 +259,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	cmds = append(cmds, cmd)
 
 	return m, tea.Batch(cmds...)
+}
+
+func (m *model) updateSuggestions() {
+	if !strings.HasPrefix(m.input, "/") {
+		m.suggestions = nil
+		m.suggestionIdx = 0
+		return
+	}
+
+	m.suggestions = []string{}
+	for _, cmd := range availableCommands {
+		if strings.HasPrefix(cmd, m.input) {
+			m.suggestions = append(m.suggestions, cmd)
+		}
+	}
+	m.suggestionIdx = 0
 }
 
 func (m *model) updateViewport() {
@@ -303,6 +355,24 @@ func (m model) View() string {
 		Padding(0, 1).
 		Render(inputArea)
 
+	// Suggestions
+	var suggestionsView string
+	if len(m.suggestions) > 0 {
+		var s []string
+		for i, sug := range m.suggestions {
+			if i == m.suggestionIdx {
+				s = append(s, stylePrompt.Render("> "+sug))
+			} else {
+				s = append(s, "  "+sug)
+			}
+		}
+		suggestionsView = lipgloss.NewStyle().
+			BorderStyle(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color(ColorBorder)).
+			Width(m.width - 2).
+			Render(strings.Join(s, "\n"))
+	}
+
 	// Footer
 	var footerText string
 	if m.showHelp {
@@ -313,6 +383,17 @@ func (m model) View() string {
 	footer := styleFooter.Width(m.width - 2).Render(footerText)
 
 	// Combine all sections
+	if suggestionsView != "" {
+		return lipgloss.JoinVertical(lipgloss.Left,
+			header,
+			viewportContent,
+			statusBar,
+			suggestionsView,
+			inputBox,
+			footer,
+		)
+	}
+
 	return lipgloss.JoinVertical(lipgloss.Left,
 		header,
 		viewportContent,
