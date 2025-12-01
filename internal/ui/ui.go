@@ -241,7 +241,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			// Add user message
-			m.messages = append(m.messages, styleUser.Render("You: ")+input)
+			m.messages = append(m.messages, styleUser.Render("[You] ")+input)
 			m.updateViewport()
 
 			cmd := m.getAgentResponse(input)
@@ -264,11 +264,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Show which tools were used
 		if msg.usage != nil && len(msg.usage.ToolsUsed) > 0 {
-			toolMsg := styleStatus.Render(fmt.Sprintf("🔧 Tools used: %s", strings.Join(msg.usage.ToolsUsed, ", ")))
+			toolMsg := styleStatus.Render(fmt.Sprintf("[🔧] Tools used: %s", strings.Join(msg.usage.ToolsUsed, ", ")))
 			m.messages = append(m.messages, toolMsg)
 		}
 
-		m.messages = append(m.messages, styleClippy.Render("Clippy: ")+msg.content)
+		m.messages = append(m.messages, styleClippy.Render("[📎] ")+msg.content)
 		if msg.usage != nil && msg.usage.Usage != nil {
 			m.totalTokens += msg.usage.Usage.TotalTokens
 			m.lastUsage = msg.usage
