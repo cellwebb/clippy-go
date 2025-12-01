@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -76,7 +77,7 @@ type model struct {
 	viewport      viewport.Model
 	help          help.Model
 	messages      []string
-	input         string
+	textInput     textinput.Model
 	quitting      bool
 	spinner       spinner.Model
 	loading       bool
@@ -100,12 +101,20 @@ func InitialModel(agt *agent.Agent) model {
 	s.Spinner = spinner.Dot
 	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorPink))
 
+	ti := textinput.New()
+	ti.Placeholder = "Type a message..."
+	ti.Focus()
+	ti.CharLimit = 500
+	ti.Width = 80
+	ti.Prompt = stylePrompt.Render("> ")
+	ti.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorCyan))
+
 	return model{
-		agent:    agt,
-		messages: []string{},
-		input:    "",
-		spinner:  s,
-		help:     help.New(),
+		agent:     agt,
+		messages:  []string{},
+		textInput: ti,
+		spinner:   s,
+		help:      help.New(),
 	}
 }
 
@@ -172,70 +181,80 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.suggestionIdx < 0 {
 					m.suggestionIdx = len(m.suggestions) - 1
 				}
+				return m, nil
 			}
+			// Forward to textinput if no suggestions
+			var cmd tea.Cmd
+			m.textInput, cmd = m.textInput.Update(msg)
+			return m, cmd
 		case "down":
 			if len(m.suggestions) > 0 {
 				m.suggestionIdx++
 				if m.suggestionIdx >= len(m.suggestions) {
 					m.suggestionIdx = 0
 				}
+				return m, nil
 			}
+			// Forward to textinput if no suggestions
+			var cmd tea.Cmd
+			m.textInput, cmd = m.textInput.Update(msg)
+			return m, cmd
 		case "tab":
 			if len(m.suggestions) > 0 {
-				m.input = m.suggestions[m.suggestionIdx]
+				m.textInput.SetValue(m.suggestions[m.suggestionIdx])
 				m.suggestions = nil
 				m.suggestionIdx = 0
-			}
-
-		case "enter":
-			if len(m.suggestions) > 0 {
-				m.input = m.suggestions[m.suggestionIdx]
-				m.suggestions = nil
-				m.suggestionIdx = 0
+				m.updateSuggestions()
 				return m, nil
 			}
 
-			if m.input == "" {
+		case "enter":
+			input := m.textInput.Value()
+			if len(m.suggestions) > 0 {
+				m.textInput.SetValue(m.suggestions[m.suggestionIdx])
+				m.suggestions = nil
+				m.suggestionIdx = 0
+				m.updateSuggestions()
+				return m, nil
+			}
+
+			if input == "" {
 				return m, nil
 			}
 
 			// Handle slash commands
-			if m.input == "/quit" || m.input == "/exit" {
+			if input == "/quit" || input == "/exit" {
 				m.quitting = true
 				return m, tea.Quit
 			}
-			if m.input == "/clear" || m.input == "/new" || m.input == "/reset" {
+			if input == "/clear" || input == "/new" || input == "/reset" {
 				m.messages = []string{}
-				m.input = ""
+				m.textInput.SetValue("")
 				m.viewport.SetContent("")
 				return m, nil
 			}
-			if m.input == "/help" {
+			if input == "/help" {
 				m.showHelp = !m.showHelp
-				m.input = ""
+				m.textInput.SetValue("")
 				return m, nil
 			}
 
 			// Add user message
-			m.messages = append(m.messages, styleUser.Render("You: ")+m.input)
+			m.messages = append(m.messages, styleUser.Render("You: ")+input)
 			m.updateViewport()
 
-			cmd := m.getAgentResponse(m.input)
-			m.input = ""
+			cmd := m.getAgentResponse(input)
+			m.textInput.SetValue("")
 			m.loading = true
 			m.toolStatus = "Thinking..."
 			return m, tea.Batch(m.spinner.Tick, cmd)
 
-		case "backspace", "delete":
-			if len(m.input) > 0 {
-				m.input = m.input[:len(m.input)-1]
-			}
-			m.updateSuggestions()
-
 		default:
-			// Regular typing
-			m.input += msg.String()
+			// Forward to textinput
+			var cmd tea.Cmd
+			m.textInput, cmd = m.textInput.Update(msg)
 			m.updateSuggestions()
+			return m, cmd
 		}
 
 	case responseMsg:
@@ -262,7 +281,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) updateSuggestions() {
-	if !strings.HasPrefix(m.input, "/") {
+	input := m.textInput.Value()
+	if !strings.HasPrefix(input, "/") {
 		m.suggestions = nil
 		m.suggestionIdx = 0
 		return
@@ -270,7 +290,7 @@ func (m *model) updateSuggestions() {
 
 	m.suggestions = []string{}
 	for _, cmd := range availableCommands {
-		if strings.HasPrefix(cmd, m.input) {
+		if strings.HasPrefix(cmd, input) {
 			m.suggestions = append(m.suggestions, cmd)
 		}
 	}
@@ -346,7 +366,7 @@ func (m model) View() string {
 	if m.loading {
 		inputArea = "⏳ Working..."
 	} else {
-		inputArea = stylePrompt.Render("> ") + m.input + "█"
+		inputArea = m.textInput.View()
 	}
 	inputBox := lipgloss.NewStyle().
 		BorderStyle(lipgloss.RoundedBorder()).
