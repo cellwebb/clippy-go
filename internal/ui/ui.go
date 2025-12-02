@@ -321,9 +321,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			if input == "/help" {
-				m.showHelp = !m.showHelp
+				helpMsg := "Help:\n"
+				helpMsg += "/help - Show this help message\n"
+				helpMsg += "/quit or /exit - Exit the application\n"
+				helpMsg += "/clear, /new, /reset - Clear the chat history\n"
+				helpMsg += "/status - Show connection and usage status\n"
+				helpMsg += "/provider [name] - Set or show LLM provider (openai, anthropic)\n"
+				helpMsg += "/model [name] - Set, show, or fetch available models\n"
+				helpMsg += "\nKeyboard shortcuts:\n"
+				helpMsg += "Ctrl+Enter - Send message\n"
+				helpMsg += "Tab - Auto-complete commands\n"
+				helpMsg += "PgUp/PgDown - Scroll history\n"
+				helpMsg += "Ctrl+C or Esc - Exit\n"
+				
+				m.messages = append(m.messages, helpMsg)
 				m.textArea.SetValue("")
 				m.textArea.SetHeight(1)
+				m.updateViewport()
 				return m, nil
 			}
 			
