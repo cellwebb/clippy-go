@@ -8,7 +8,6 @@ import (
 	"github.com/cellwebb/clippy-go/internal/agent"
 	"github.com/cellwebb/clippy-go/internal/llm"
 	"github.com/charmbracelet/bubbles/help"
-	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -32,10 +31,6 @@ var (
 	styleUser   = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorCyan))
 	styleClippy = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorYellow))
 	styleStatus = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorPurple)).Italic(true)
-	styleBorder = lipgloss.NewStyle().
-			BorderStyle(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color(ColorBorder)).
-			Padding(0, 1)
 	styleHeader = lipgloss.NewStyle().
 			Foreground(lipgloss.Color(ColorPink)).
 			Bold(true).
@@ -48,41 +43,7 @@ var (
 			Faint(true)
 )
 
-type keyMap struct {
-	Quit     key.Binding
-	Help     key.Binding
-	PageUp   key.Binding
-	PageDown key.Binding
-}
 
-func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Help, k.Quit}
-}
-
-func (k keyMap) FullHelp() [][]key.Binding {
-	return [][]key.Binding{
-		{k.Help, k.Quit},
-	}
-}
-
-var keys = keyMap{
-	Quit: key.NewBinding(
-		key.WithKeys("ctrl+c", "esc"),
-		key.WithHelp("ctrl+c", "quit"),
-	),
-	Help: key.NewBinding(
-		key.WithKeys("?"),
-		key.WithHelp("?", "toggle help"),
-	),
-	PageUp: key.NewBinding(
-		key.WithKeys("pgup"),
-		key.WithHelp("pgup", "scroll up"),
-	),
-	PageDown: key.NewBinding(
-		key.WithKeys("pgdown"),
-		key.WithHelp("pgdown", "scroll down"),
-	),
-}
 
 type model struct {
 	agent         *agent.Agent
@@ -121,7 +82,14 @@ func InitialModel(agt *agent.Agent) model {
 	ta.SetHeight(1)
 	ta.Prompt = "" // Remove prompt from textarea, will add it manually
 	ta.ShowLineNumbers = false
+	cyanStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorCyan))
+	ta.FocusedStyle.Base = cyanStyle
+	ta.FocusedStyle.Text = cyanStyle
+	ta.FocusedStyle.Placeholder = cyanStyle.Faint(true)
 	ta.FocusedStyle.CursorLine = lipgloss.NewStyle()
+	ta.BlurredStyle.Base = cyanStyle
+	ta.BlurredStyle.Text = cyanStyle
+	ta.BlurredStyle.Placeholder = cyanStyle.Faint(true)
 	ta.KeyMap.InsertNewline.SetEnabled(true) // Allow newlines, Ctrl+Enter to send
 
 	return model{
@@ -354,11 +322,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if cfg.BaseURL != "" {
 					statusMsg += fmt.Sprintf("%sBase URL: %s\n", styleStatus.Render("  "), styleClippy.Render(cfg.BaseURL))
 				} else {
-					if cfg.Provider == "openai" {
+					switch cfg.Provider {
+					case "openai":
 						statusMsg += fmt.Sprintf("%sBase URL: %s\n", styleStatus.Render("  "), styleClippy.Render("https://api.openai.com/v1"))
-					} else if cfg.Provider == "anthropic" {
+					case "anthropic":
 						statusMsg += fmt.Sprintf("%sBase URL: %s\n", styleStatus.Render("  "), styleClippy.Render("https://api.anthropic.com/v1"))
-					} else {
+					default:
 						statusMsg += fmt.Sprintf("%sBase URL: %s\n", styleStatus.Render("  "), styleClippy.Render("default"))
 					}
 				}
@@ -442,15 +411,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					
 					// estimated cost (rough calculations)
 					var estimatedCost string
-					if cfg.Provider == "openai" {
+					switch cfg.Provider {
+					case "openai":
 						// Rough estimates for GPT-4
 						cost := float64(m.totalTokens) * 0.00003 // $0.03 per 1K tokens
 						estimatedCost = fmt.Sprintf("$%.4f", cost)
-					} else if cfg.Provider == "anthropic" {
+					case "anthropic":
 						// Rough estimates for Claude
 						cost := float64(m.totalTokens) * 0.00003 // $0.03 per 1K tokens
 						estimatedCost = fmt.Sprintf("$%.4f", cost)
-					} else {
+					default:
 						estimatedCost = "unknown"
 					}
 					statusMsg += fmt.Sprintf("%sEstimated cost: %s%s%s\n", 
@@ -768,7 +738,13 @@ func (m model) View() string {
 		lines := strings.Split(textareaContent, "\n")
 		if len(lines) > 0 {
 			// Add prompt only to the first line
-			lines[0] = stylePrompt.Render("> ") + lines[0]
+			lines[0] = stylePrompt.Render("> ") + styleUser.Render(lines[0])
+			// Apply cyan style to all other lines
+			for i := 1; i < len(lines); i++ {
+				if lines[i] != "" {
+					lines[i] = styleUser.Render(lines[i])
+				}
+			}
 			textareaContent = strings.Join(lines, "\n")
 		}
 		inputBox = lipgloss.NewStyle().
