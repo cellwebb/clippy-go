@@ -218,13 +218,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.textArea, cmd = m.textArea.Update(msg)
 			return m, cmd
 		case "shift+enter":
-			// Handle newline in textarea (when default enter key is disabled)
+			// Handle newline in textarea
 			var cmd tea.Cmd
 			m.textArea, cmd = m.textArea.Update(msg)
 			// Auto-resize textarea based on content
 			m.resizeTextarea()
 			return m, cmd
-
+		case "tab":
 			if len(m.suggestions) > 0 {
 				m.textArea.SetValue(m.suggestions[m.suggestionIdx])
 				m.suggestions = nil
@@ -660,8 +660,9 @@ func (m *model) resizeTextarea() {
 	}
 	wrappedContent := wrapText(content, textareaWidth)
 
-	// Only update if the content has actually changed (to avoid cursor jumping)
-	if wrappedContent != content {
+	// Only update if the content has actually changed and no suggestions are showing
+	// (to avoid interfering with tab completion)
+	if wrappedContent != content && len(m.suggestions) == 0 {
 		// For now, just update without trying to preserve cursor position
 		// This is a limitation of the textarea component
 		m.textArea.SetValue(wrappedContent)
