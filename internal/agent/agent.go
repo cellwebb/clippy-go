@@ -8,19 +8,40 @@ import (
 	"github.com/cellwebb/clippy-go/internal/tools"
 )
 
+// ToolExecution represents a tool execution event
+type ToolExecution struct {
+	Name      string
+	Arguments map[string]interface{}
+	Result    string
+	IsError   bool
+}
+
+// ToolCallback represents a function called when tools are executed
+type ToolCallback func(execution ToolExecution)
+
+// ToolExecutionDetail represents the details of a specific tool execution
+type ToolExecutionDetail struct {
+	Name      string
+	Arguments map[string]interface{}
+	Result    string
+	IsError   bool
+}
+
 // Response represents the agent's full response including usage stats
 type Response struct {
-	Content   string
-	Usage     *llm.Usage
-	ToolsUsed []string
+	Content       string
+	Usage         *llm.Usage
+	ToolsUsed     []string
+	ToolExecutions []ToolExecutionDetail
 }
 
 // Agent represents our helpful Clippy assistant
 type Agent struct {
-	Name    string
-	LLM     llm.Provider
-	Tools   []tools.Tool
-	History []llm.Message
+	Name       string
+	LLM        llm.Provider
+	Tools      []tools.Tool
+	History    []llm.Message
+	ToolCallback ToolCallback // Callback for real-time tool events
 }
 
 // New creates a new Agent
@@ -71,6 +92,7 @@ func (a *Agent) GetResponse(input string) Response {
 	// Accumulate token usage across all LLM calls
 	totalUsage := &llm.Usage{}
 	var toolsUsed []string
+	var toolExecutions []ToolExecutionDetail
 	var prevToolCalls []llm.ToolCall
 
 	// Tool execution loop (max 15 turns to prevent infinite loops)
@@ -95,29 +117,40 @@ func (a *Agent) GetResponse(input string) Response {
 		// If no tool calls, return the content
 		if len(resp.ToolCalls) == 0 {
 			return Response{
-				Content:   resp.Content,
-				Usage:     totalUsage,
-				ToolsUsed: toolsUsed,
+				Content:        resp.Content,
+				Usage:          totalUsage,
+				ToolsUsed:      toolsUsed,
+				ToolExecutions: toolExecutions,
 			}
 		}
 
 		// Check for infinite loops (same tool calls as previous turn)
 		if i > 0 && reflect.DeepEqual(resp.ToolCalls, prevToolCalls) {
 			return Response{
-				Content:   "I'm stuck in a loop! I keep trying to do the same thing over and over. Stopping to save your tokens.",
-				Usage:     totalUsage,
-				ToolsUsed: toolsUsed,
+				Content:        "I'm stuck in a loop! I keep trying to do the same thing over and over. Stopping to save your tokens.",
+				Usage:          totalUsage,
+				ToolsUsed:      toolsUsed,
+				ToolExecutions: toolExecutions,
 			}
 		}
 		prevToolCalls = resp.ToolCalls
-
-		// Execute tools
+			// Execute tools
 		for _, tc := range resp.ToolCalls {
 			var result string
 			var err error
 
 			// Track tool usage
 			toolsUsed = append(toolsUsed, tc.Name)
+
+			// Emit tool start event
+			if a.ToolCallback != nil {
+				a.ToolCallback(ToolExecution{
+					Name:      tc.Name,
+					Arguments: tc.Arguments,
+					Result:    "",
+					IsError:   false,
+				}) // Start event
+			}
 
 			// Find tool
 			var tool tools.Tool
@@ -130,11 +163,49 @@ func (a *Agent) GetResponse(input string) Response {
 
 			if tool != nil {
 				result, err = tool.Execute(tc.Arguments)
+				isError := err != nil
 				if err != nil {
 					result = fmt.Sprintf("Error executing tool: %v", err)
 				}
+				
+				// Collect tool execution detail
+				toolExecutions = append(toolExecutions, ToolExecutionDetail{
+					Name:      tc.Name,
+					Arguments: tc.Arguments,
+					Result:    result,
+					IsError:   isError,
+				})
+				
+				// Emit tool completion event
+				if a.ToolCallback != nil {
+					a.ToolCallback(ToolExecution{
+						Name:      tc.Name,
+						Arguments: tc.Arguments,
+						Result:    result,
+						IsError:   isError,
+					})
+				}
 			} else {
 				result = fmt.Sprintf("Tool not found: %s", tc.Name)
+				isError := true
+				
+				// Collect tool execution detail
+				toolExecutions = append(toolExecutions, ToolExecutionDetail{
+					Name:      tc.Name,
+					Arguments: tc.Arguments,
+					Result:    result,
+					IsError:   isError,
+				})
+				
+				// Emit tool error event
+				if a.ToolCallback != nil {
+					a.ToolCallback(ToolExecution{
+						Name:      tc.Name,
+						Arguments: tc.Arguments,
+						Result:    result,
+						IsError:   true,
+					})
+				}
 			}
 
 			// Add tool result to history
@@ -147,9 +218,10 @@ func (a *Agent) GetResponse(input string) Response {
 	}
 
 	return Response{
-		Content:   "I ran out of moves! (Max steps reached). Try breaking down your request.",
-		Usage:     totalUsage,
-		ToolsUsed: toolsUsed,
+		Content:        "I ran out of moves! (Max steps reached). Try breaking down your request.",
+		Usage:          totalUsage,
+		ToolsUsed:      toolsUsed,
+		ToolExecutions: toolExecutions,
 	}
 }
 
@@ -179,6 +251,11 @@ func (a *Agent) UpdateConfig(cfg llm.Config) {
 	if a.LLM != nil {
 		a.LLM.UpdateConfig(cfg)
 	}
+}
+
+// SetToolCallback sets the callback function for real-time tool events
+func (a *Agent) SetToolCallback(callback ToolCallback) {
+	a.ToolCallback = callback
 }
 
 // GetHistory returns the conversation history
