@@ -7,6 +7,7 @@ import (
 
 	"github.com/cellwebb/clippy-go/internal/agent"
 	"github.com/cellwebb/clippy-go/internal/llm"
+	"github.com/cellwebb/clippy-go/internal/tools"
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textarea"
@@ -31,6 +32,8 @@ var (
 	styleUser   = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorCyan))
 	styleClippy = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorYellow))
 	styleStatus = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorPurple)).Italic(true)
+	styleTool   = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorCyan)).Faint(true)
+	styleToolError = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorPink)).Bold(true)
 	styleHeader = lipgloss.NewStyle().
 			Foreground(lipgloss.Color(ColorPink)).
 			Bold(true).
@@ -108,6 +111,17 @@ func (m model) Init() tea.Cmd {
 type responseMsg struct {
 	content string
 	usage   *agent.Response
+}
+
+type toolExecMsg struct {
+	toolName string
+	result   string
+	error    bool
+}
+
+type toolStartMsg struct {
+	toolName string
+	arguments map[string]interface{}
 }
 
 func (m model) getAgentResponse(input string) tea.Cmd {
@@ -520,10 +534,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loading = false
 		m.toolStatus = ""
 
-		// Show which tools were used
-		if msg.usage != nil && len(msg.usage.ToolsUsed) > 0 {
-			toolMsg := styleStatus.Render(fmt.Sprintf("[🔧] Tools used: %s", strings.Join(msg.usage.ToolsUsed, ", ")))
-			m.messages = append(m.messages, toolMsg)
+		// Show detailed tool execution information
+		if msg.usage != nil && len(msg.usage.ToolExecutions) > 0 {
+			for _, exec := range msg.usage.ToolExecutions {
+				// Create a description of the tool execution
+				desc := tools.FormatToolExecution(exec.Name, exec.Arguments)
+				
+				// Style based on success/error
+				var execMsg string
+				if exec.IsError {
+					execMsg = styleToolError.Render(fmt.Sprintf("[❌] %s", desc))
+				} else {
+					execMsg = styleTool.Render(fmt.Sprintf("[✓] %s", desc))
+				}
+				m.messages = append(m.messages, execMsg)
+			}
 		}
 
 		// Strip any leading emojis and whitespace from the content
