@@ -523,3 +523,64 @@ func (t GetCurrentDirectoryTool) Execute(args map[string]interface{}) (string, e
 	}
 	return dir, nil
 }
+
+// FormatToolExecution creates a human-readable description of a tool execution
+func FormatToolExecution(toolName string, args map[string]interface{}) string {
+	switch toolName {
+	case "read_file":
+		if path, ok := args["path"].(string); ok {
+			return fmt.Sprintf("📖 Reading file: %s", path)
+		}
+	case "write_file":
+		if path, ok := args["path"].(string); ok {
+			return fmt.Sprintf("✍️  Writing file: %s", path)
+		}
+	case "edit_file":
+		if path, ok := args["path"].(string); ok {
+			return fmt.Sprintf("✏️  Editing file: %s", path)
+		}
+	case "list_directory":
+		if path, ok := args["path"].(string); ok {
+			return fmt.Sprintf("📁 Listing directory: %s", path)
+		}
+	case "search_files":
+		if path, ok := args["path"].(string); ok {
+			if pattern, ok := args["pattern"].(string); ok {
+				return fmt.Sprintf("🔍 Searching in %s for: %s", path, pattern)
+			}
+			return fmt.Sprintf("🔍 Searching in: %s", path)
+		}
+	case "create_directory":
+		if path, ok := args["path"].(string); ok {
+			return fmt.Sprintf("📂 Creating directory: %s", path)
+		}
+	case "delete_file":
+		if path, ok := args["path"].(string); ok {
+			return fmt.Sprintf("🗑️  Deleting file: %s", path)
+		}
+	case "move_file":
+		if source, ok := args["source"].(string); ok {
+			if dest, ok := args["destination"].(string); ok {
+				return fmt.Sprintf("📦 Moving %s → %s", source, dest)
+			}
+			return fmt.Sprintf("📦 Moving: %s", source)
+		}
+	case "append_to_file":
+		if path, ok := args["path"].(string); ok {
+			return fmt.Sprintf("➕ Appending to: %s", path)
+		}
+	case "read_file_lines":
+		if path, ok := args["path"].(string); ok {
+			return fmt.Sprintf("📖 Reading lines from: %s", path)
+		}
+	case "run_command":
+		if command, ok := args["command"].(string); ok {
+			return fmt.Sprintf("⚡ Running: %s", command)
+		}
+	case "get_current_directory":
+		return "📍 Getting current directory"
+	}
+	
+	// Fallback format
+	return fmt.Sprintf("🔧 Executing: %s", toolName)
+}
