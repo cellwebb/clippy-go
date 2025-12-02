@@ -224,7 +224,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if scrollAmount < 1 {
 				scrollAmount = 1
 			}
-			m.viewport.LineUp(scrollAmount)
+			m.viewport.ScrollUp(scrollAmount)
 			return m, nil
 		case "pgdown":
 			// Scroll viewport down by a page
@@ -232,7 +232,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if scrollAmount < 1 {
 				scrollAmount = 1
 			}
-			m.viewport.LineDown(scrollAmount)
+			m.viewport.ScrollDown(scrollAmount)
 			return m, nil
 
 		case "enter":
