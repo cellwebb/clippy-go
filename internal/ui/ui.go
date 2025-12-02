@@ -48,8 +48,10 @@ var (
 )
 
 type keyMap struct {
-	Quit key.Binding
-	Help key.Binding
+	Quit     key.Binding
+	Help     key.Binding
+	PageUp   key.Binding
+	PageDown key.Binding
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
@@ -70,6 +72,14 @@ var keys = keyMap{
 	Help: key.NewBinding(
 		key.WithKeys("?"),
 		key.WithHelp("?", "toggle help"),
+	),
+	PageUp: key.NewBinding(
+		key.WithKeys("pgup"),
+		key.WithHelp("pgup", "scroll up"),
+	),
+	PageDown: key.NewBinding(
+		key.WithKeys("pgdown"),
+		key.WithHelp("pgdown", "scroll down"),
 	),
 }
 
@@ -208,6 +218,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.updateSuggestions()
 				return m, nil
 			}
+		case "pgup":
+			// Scroll viewport up by a page
+			scrollAmount := m.viewport.Height / 2
+			if scrollAmount < 1 {
+				scrollAmount = 1
+			}
+			m.viewport.LineUp(scrollAmount)
+			return m, nil
+		case "pgdown":
+			// Scroll viewport down by a page
+			scrollAmount := m.viewport.Height / 2
+			if scrollAmount < 1 {
+				scrollAmount = 1
+			}
+			m.viewport.LineDown(scrollAmount)
+			return m, nil
 
 		case "enter":
 			input := m.textInput.Value()
@@ -652,9 +678,9 @@ func (m model) View() string {
 	// Footer
 	var footerText string
 	if m.showHelp {
-		footerText = "Commands: /quit /exit /clear /new /reset /help /status | Keys: ? (help) ctrl+c (quit) | Mouse wheel scrolls chat history"
+		footerText = "Commands: /quit /exit /clear /new /reset /help /status | Keys: ? (help) ctrl+c (quit) pgup/pgdown (scroll) | Mouse wheel scrolls chat history"
 	} else {
-		footerText = "/quit /clear /help /status | ? for more help | mouse wheel to scroll | ctrl+c to exit"
+		footerText = "/quit /clear /help /status | ? for more help | pgup/pgdown or mouse wheel to scroll | ctrl+c to exit"
 	}
 	footer := styleFooter.Width(m.width - 2).Render(footerText)
 
