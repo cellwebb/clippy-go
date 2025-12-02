@@ -3,13 +3,14 @@ package ui
 import (
 	"fmt"
 	"strings"
+	"unicode"
 
 	"github.com/cellwebb/clippy-go/internal/agent"
 	"github.com/cellwebb/clippy-go/internal/llm"
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -88,7 +89,7 @@ type model struct {
 	viewport      viewport.Model
 	help          help.Model
 	messages      []string
-	textInput     textinput.Model
+	textArea      textarea.Model
 	quitting      bool
 	spinner       spinner.Model
 	loading       bool
@@ -112,20 +113,23 @@ func InitialModel(agt *agent.Agent) model {
 	s.Spinner = spinner.Dot
 	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorPink))
 
-	ti := textinput.New()
-	ti.Placeholder = "Type a message..."
-	ti.Focus()
-	ti.CharLimit = 500
-	ti.Width = 80
-	ti.Prompt = stylePrompt.Render("> ")
-	ti.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorCyan))
+	ta := textarea.New()
+	ta.Placeholder = "Type a message..."
+	ta.Focus()
+	ta.CharLimit = 2000
+	ta.SetWidth(80)
+	ta.SetHeight(1)
+	ta.Prompt = "" // Remove prompt from textarea, will add it manually
+	ta.ShowLineNumbers = false
+	ta.FocusedStyle.CursorLine = lipgloss.NewStyle()
+	ta.KeyMap.InsertNewline.SetEnabled(true) // Allow newlines, Ctrl+Enter to send
 
 	return model{
-		agent:     agt,
-		messages:  []string{},
-		textInput: ti,
-		spinner:   s,
-		help:      help.New(),
+		agent:    agt,
+		messages: []string{},
+		textArea: ta,
+		spinner:  s,
+		help:     help.New(),
 	}
 }
 
@@ -159,7 +163,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		headerHeight := 5
 		footerHeight := 3
 		statusHeight := 1
-		inputHeight := 1
+		inputHeight := m.textArea.Height()
+
+		m.width = msg.Width
+		m.height = msg.Height
+		m.textArea.SetWidth(msg.Width - 4) // Adjust textarea width to window
+		m.resizeTextarea() // Recalculate height after width change
+		inputHeight = m.textArea.Height() // Get updated height
 
 		if !m.ready {
 			m.viewport = viewport.New(msg.Width, msg.Height-headerHeight-footerHeight-statusHeight-inputHeight)
@@ -169,9 +179,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewport.Width = msg.Width
 			m.viewport.Height = msg.Height - headerHeight - footerHeight - statusHeight - inputHeight
 		}
-
-		m.width = msg.Width
-		m.height = msg.Height
 
 	case tea.KeyMsg:
 		if m.loading {
@@ -194,9 +201,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
-			// Forward to textinput if no suggestions
+			// Forward to textarea if no suggestions
 			var cmd tea.Cmd
-			m.textInput, cmd = m.textInput.Update(msg)
+			m.textArea, cmd = m.textArea.Update(msg)
 			return m, cmd
 		case "down":
 			if len(m.suggestions) > 0 {
@@ -206,16 +213,24 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
-			// Forward to textinput if no suggestions
+			// Forward to textarea if no suggestions
 			var cmd tea.Cmd
-			m.textInput, cmd = m.textInput.Update(msg)
+			m.textArea, cmd = m.textArea.Update(msg)
 			return m, cmd
-		case "tab":
+		case "shift+enter":
+			// Handle newline in textarea (when default enter key is disabled)
+			var cmd tea.Cmd
+			m.textArea, cmd = m.textArea.Update(msg)
+			// Auto-resize textarea based on content
+			m.resizeTextarea()
+			return m, cmd
+
 			if len(m.suggestions) > 0 {
-				m.textInput.SetValue(m.suggestions[m.suggestionIdx])
+				m.textArea.SetValue(m.suggestions[m.suggestionIdx])
 				m.suggestions = nil
 				m.suggestionIdx = 0
 				m.updateSuggestions()
+				m.resizeTextarea()
 				return m, nil
 			}
 		case "pgup":
@@ -235,8 +250,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewport.ScrollDown(scrollAmount)
 			return m, nil
 
+		case "ctrl+enter":
+			// Continue with the original enter logic for sending messages
 		case "enter":
-			input := m.textInput.Value()
+			input := m.textArea.Value()
 
 			// If suggestions are showing but input already matches exactly, execute it
 			if len(m.suggestions) > 0 {
@@ -251,10 +268,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 				// If not an exact match, select the suggestion
 				if !isExactMatch {
-					m.textInput.SetValue(m.suggestions[m.suggestionIdx])
+					m.textArea.SetValue(m.suggestions[m.suggestionIdx])
 					m.suggestions = nil
 					m.suggestionIdx = 0
 					m.updateSuggestions()
+					m.resizeTextarea()
 					return m, nil
 				}
 
@@ -274,7 +292,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if input == "/clear" || input == "/new" || input == "/reset" {
 				m.messages = []string{}
-				m.textInput.SetValue("")
+				m.textArea.SetValue("")
+				m.textArea.SetHeight(1)
 				m.viewport.SetContent("")
 				m.agent.ClearHistory()
 				return m, nil
@@ -293,7 +312,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					// List providers
 					m.messages = append(m.messages, styleStatus.Render("[⚙️] Available providers: openai, anthropic"))
 				}
-				m.textInput.SetValue("")
+				m.textArea.SetValue("")
+				m.textArea.SetHeight(1)
 				m.updateViewport()
 				return m, nil
 			}
@@ -307,7 +327,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					cfg.Model = modelName
 					m.agent.UpdateConfig(cfg)
 					m.messages = append(m.messages, styleStatus.Render(fmt.Sprintf("[⚙️] Model set to: %s", modelName)))
-					m.textInput.SetValue("")
+					m.textArea.SetValue("")
+					m.textArea.SetHeight(1)
 					m.updateViewport()
 					return m, nil
 				} else {
@@ -319,7 +340,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if input == "/help" {
 				m.showHelp = !m.showHelp
-				m.textInput.SetValue("")
+				m.textArea.SetValue("")
+				m.textArea.SetHeight(1)
 				return m, nil
 			}
 			
@@ -486,7 +508,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				
 				m.messages = append(m.messages, statusMsg)
-				m.textInput.SetValue("")
+				m.textArea.SetValue("")
+				m.textArea.SetHeight(1)
 				m.updateViewport()
 				return m, nil
 			}
@@ -496,15 +519,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.updateViewport()
 
 			cmd := m.getAgentResponse(input)
-			m.textInput.SetValue("")
+			m.textArea.SetValue("")
+			m.textArea.SetHeight(1)
 			m.loading = true
 			m.toolStatus = "Thinking..."
 			return m, tea.Batch(m.spinner.Tick, cmd)
 
 		default:
-			// Forward to textinput
+			// Forward to textarea
 			var cmd tea.Cmd
-			m.textInput, cmd = m.textInput.Update(msg)
+			m.textArea, cmd = m.textArea.Update(msg)
+			// Auto-resize textarea based on content
+			m.resizeTextarea()
 			m.updateSuggestions()
 			return m, cmd
 		}
@@ -563,7 +589,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) updateSuggestions() {
-	input := m.textInput.Value()
+	input := m.textArea.Value()
 	if !strings.HasPrefix(input, "/") {
 		m.suggestions = nil
 		m.suggestionIdx = 0
@@ -577,6 +603,89 @@ func (m *model) updateSuggestions() {
 		}
 	}
 	m.suggestionIdx = 0
+}
+
+// wrapText wraps text to the specified width, preserving newlines
+func wrapText(text string, width int) string {
+	if width <= 0 {
+		return text
+	}
+
+	// Split by existing newlines
+	lines := strings.Split(text, "\n")
+	var wrappedLines []string
+
+	for _, line := range lines {
+		if len(line) == 0 {
+			wrappedLines = append(wrappedLines, "")
+			continue
+		}
+
+		// Wrap each line
+		for len(line) > width {
+			// Find the last space before the width limit
+			breakPoint := width
+			for ; breakPoint > 0 && !unicode.IsSpace(rune(line[breakPoint])); breakPoint-- {
+			}
+
+			if breakPoint == 0 {
+				// No spaces found, break at width
+				breakPoint = width
+			}
+
+			wrappedLines = append(wrappedLines, strings.TrimSpace(line[:breakPoint]))
+			line = strings.TrimSpace(line[breakPoint:])
+		}
+
+		if len(line) > 0 {
+			wrappedLines = append(wrappedLines, line)
+		}
+	}
+
+	return strings.Join(wrappedLines, "\n")
+}
+
+// resizeTextarea automatically adjusts the textarea height based on content
+func (m *model) resizeTextarea() {
+	content := m.textArea.Value()
+	if content == "" {
+		m.textArea.SetHeight(1)
+		return
+	}
+
+	// Apply word wrapping and update content
+	textareaWidth := m.textArea.Width()
+	if textareaWidth <= 0 {
+		textareaWidth = 80
+	}
+	wrappedContent := wrapText(content, textareaWidth)
+
+	// Only update if the content has actually changed (to avoid cursor jumping)
+	if wrappedContent != content {
+		// For now, just update without trying to preserve cursor position
+		// This is a limitation of the textarea component
+		m.textArea.SetValue(wrappedContent)
+	}
+
+	// Calculate the height based on wrapped lines
+	lines := strings.Count(wrappedContent, "\n") + 1
+
+	// Set min height to 1, max height to 10 for reasonable UX
+	maxHeight := 10
+	if m.height > 20 {
+		// Don't let textarea take more than 1/2 of available height
+		maxHeight = (m.height - 10) / 2
+	}
+	if maxHeight < 3 {
+		maxHeight = 3
+	}
+	if lines < 1 {
+		lines = 1
+	}
+	if lines > maxHeight {
+		lines = maxHeight
+	}
+	m.textArea.SetHeight(lines)
 }
 
 func (m *model) updateViewport() {
@@ -642,20 +751,32 @@ func (m model) View() string {
 		statusText = fmt.Sprintf("Ready | Messages: %d%s | Use mouse wheel to scroll through history", len(m.messages)/2, usageInfo)
 	}
 	statusBar := styleStatus.Width(m.width - 2).Render(statusText)
-
-	// Input area
-	var inputArea string
+		// Input area
+	var inputBox string
 	if m.loading {
-		inputArea = "⏳ Working..."
+		inputArea := stylePrompt.Render("> ") + "⏳ Working..."
+		inputBox = lipgloss.NewStyle().
+			BorderStyle(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color(ColorBorder)).
+			Width(m.width - 2).
+			Padding(0, 1).
+			Render(inputArea)
 	} else {
-		inputArea = m.textInput.View()
+		// Add prompt manually only for the first line
+		textareaContent := m.textArea.View()
+		lines := strings.Split(textareaContent, "\n")
+		if len(lines) > 0 {
+			// Add prompt only to the first line
+			lines[0] = stylePrompt.Render("> ") + lines[0]
+			textareaContent = strings.Join(lines, "\n")
+		}
+		inputBox = lipgloss.NewStyle().
+			BorderStyle(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color(ColorBorder)).
+			Width(m.width - 2).
+			Padding(0, 1).
+			Render(textareaContent)
 	}
-	inputBox := lipgloss.NewStyle().
-		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color(ColorBorder)).
-		Width(m.width-2).
-		Padding(0, 1).
-		Render(inputArea)
 
 	// Suggestions
 	var suggestionsView string
@@ -678,9 +799,9 @@ func (m model) View() string {
 	// Footer
 	var footerText string
 	if m.showHelp {
-		footerText = "Commands: /quit /exit /clear /new /reset /help /status | Keys: ? (help) ctrl+c (quit) pgup/pgdown (scroll) | Mouse wheel scrolls chat history"
+		footerText = "Commands: /quit /exit /clear /new /reset /help /status | Keys: ? (help) ctrl+c (quit) pgup/pgdown (scroll) Ctrl+Enter (send) | Mouse wheel scrolls chat history"
 	} else {
-		footerText = "/quit /clear /help /status | ? for more help | pgup/pgdown or mouse wheel to scroll | ctrl+c to exit"
+		footerText = "/quit /clear /help /status | ? for more help | pgup/pgdown or mouse wheel to scroll | Ctrl+Enter to send | ctrl+c to exit"
 	}
 	footer := styleFooter.Width(m.width - 2).Render(footerText)
 
@@ -701,7 +822,7 @@ func (m model) View() string {
 		viewportContent,
 		statusBar,
 		inputBox,
-	 footer,
+		footer,
 	)
 }
 
