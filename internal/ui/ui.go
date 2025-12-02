@@ -93,7 +93,7 @@ func InitialModel(agt *agent.Agent) model {
 	ta.BlurredStyle.Base = cyanStyle
 	ta.BlurredStyle.Text = cyanStyle
 	ta.BlurredStyle.Placeholder = cyanStyle.Faint(true)
-	ta.KeyMap.InsertNewline.SetEnabled(true) // Allow newlines, Ctrl+Enter to send
+	ta.KeyMap.InsertNewline.SetEnabled(true) // Allow newlines with Ctrl+Enter or Shift+Enter
 
 	return model{
 		agent:    agt,
@@ -175,6 +175,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "?":
 			m.showHelp = !m.showHelp
+
 		case "up":
 			if len(m.suggestions) > 0 {
 				m.suggestionIdx--
@@ -186,25 +187,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Forward to textarea if no suggestions
 			var cmd tea.Cmd
 			m.textArea, cmd = m.textArea.Update(msg)
-			return m, cmd
-		case "down":
-			if len(m.suggestions) > 0 {
-				m.suggestionIdx++
-				if m.suggestionIdx >= len(m.suggestions) {
-					m.suggestionIdx = 0
-				}
-				return m, nil
-			}
-			// Forward to textarea if no suggestions
-			var cmd tea.Cmd
-			m.textArea, cmd = m.textArea.Update(msg)
-			return m, cmd
-		case "shift+enter":
-			// Handle newline in textarea
-			var cmd tea.Cmd
-			m.textArea, cmd = m.textArea.Update(msg)
-			// Auto-resize textarea based on content
-			m.resizeTextarea()
 			return m, cmd
 		case "tab":
 			if len(m.suggestions) > 0 {
@@ -233,8 +215,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case "ctrl+enter":
-			// Continue with the original enter logic for sending messages
+			// Handle newline in textarea
+			var cmd tea.Cmd
+			m.textArea, cmd = m.textArea.Update(msg)
+			// Auto-resize textarea based on content
+			m.resizeTextarea()
+			return m, cmd
 		case "enter":
+			// Continue with the original enter logic for sending messages
 			input := m.textArea.Value()
 
 			// If suggestions are showing but input already matches exactly, execute it
@@ -329,7 +317,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				helpMsg += "/provider [name] - Set or show LLM provider (openai, anthropic)\n"
 				helpMsg += "/model [name] - Set, show, or fetch available models\n"
 				helpMsg += "\nKeyboard shortcuts:\n"
-				helpMsg += "Ctrl+Enter - Send message\n"
+				helpMsg += "Enter - Send message\n"
+				helpMsg += "Ctrl+Enter - Add new line without sending\n"
 				helpMsg += "Tab - Auto-complete commands\n"
 				helpMsg += "PgUp/PgDown - Scroll history\n"
 				helpMsg += "Ctrl+C or Esc - Exit\n"
@@ -804,9 +793,9 @@ func (m model) View() string {
 	// Footer
 	var footerText string
 	if m.showHelp {
-		footerText = "Commands: /quit /exit /clear /new /reset /help /status | Keys: ? (help) ctrl+c (quit) pgup/pgdown (scroll) Ctrl+Enter (send) | Mouse wheel scrolls chat history"
+		footerText = "Commands: /quit /exit /clear /new /reset /help /status | Keys: ? (help) ctrl+c (quit) pgup/pgdown (scroll) Enter (send) | Mouse wheel scrolls chat history"
 	} else {
-		footerText = "/quit /clear /help /status | ? for more help | pgup/pgdown or mouse wheel to scroll | Ctrl+Enter to send | ctrl+c to exit"
+		footerText = "/quit /clear /help /status | ? for more help | pgup/pgdown or mouse wheel to scroll | Enter to send | ctrl+c to exit"
 	}
 	footer := styleFooter.Width(m.width - 2).Render(footerText)
 
