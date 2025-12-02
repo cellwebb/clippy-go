@@ -685,18 +685,7 @@ func (m model) View() string {
 	}
 
 	// Header
-	clippyArt := `
-   __
-  /  \
-  |  |
-  @  @
-  |  |
-  || |
-  || |
-  |__|
-`
 	headerContent := lipgloss.JoinVertical(lipgloss.Center,
-		styleClippy.Render(clippyArt),
 		stylePrompt.Render("V A P O R W A V E   C L I P P Y"),
 	)
 	header := styleHeader.Width(m.width - 2).Render(headerContent)
